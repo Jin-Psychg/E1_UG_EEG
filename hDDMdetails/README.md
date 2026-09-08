@@ -1,3 +1,8 @@
+> Final-analysis update: these notebooks are historical reference copies.
+> The selected final notebooks, configurations and follow-up scripts are
+> distributed in the [final-analysis code addendum](../FINAL_ANALYSIS_ADDENDUM.md).
+> See that page for download instructions and remaining environment checks.
+
 # hDDMdetails/ — HDDM reference copies
 
 Reference copies of the two final Hierarchical Drift Diffusion Model (HDDM)
