@@ -3359,14 +3359,12 @@ cat(sprintf("\n\n========================================\n   ALL STAGES COMPLET
 # Integrative stage), and for each of the two primary behavioural outcomes
 # (rejection: reject_binary, GLMM binomial; speed: logRT, LMM Gaussian), each
 # candidate variable is added as a single grand-standardized (z) MAIN-EFFECT
-# covariate on top of the already-selected design model:
+# covariate in the complete design model:
 #
-#   <outcome> ~ (emotion + offer_type)^2 + <var>_z + <design random structure>
+#   <outcome> ~ (emotion + offer_type)^2 + <var>_z + <selected random structure>
 #
-# The design random structure is inherited from the corresponding primary model
-# (Section 7) so the trait models within an outcome share one data-supported
-# random structure and are mutually comparable (mirrors the EEG nuisance-
-# covariate control in Sta_EEG_OfferPhase_RefAlday.Rmd).
+# Random structure is selected separately for each complete covariate model
+# using the common five-step procedure, with all fixed terms retained.
 #
 # VARIABLES (10), in three families:
 #   SVO      : SVO_angle  -- Social Value Orientation (the one a-priori variable).
@@ -3593,8 +3591,8 @@ for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_s
     by = "participant_id_internal"
   )
 
-  # Primary models create explicit sum-contrast random-slope columns inside
-  # fit_stage1_bates(). Trait refits reuse those formulas outside that function,
+  # The selector creates explicit sum-contrast random-slope columns inside
+  # fit_stage1_bates(). Final trait refits use its formulas outside that function,
   # so the same columns must also exist in the outer analysis data.
   trait_random_design <- add_random_contrast_columns(
     df_merged, random_vars = trait_random_vars,
@@ -3614,53 +3612,8 @@ for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_s
     out_oc   <- file.path(out_stage, oc_key)
     if (!dir.exists(out_oc)) dir.create(out_oc, recursive = TRUE)
 
-    progress_log(sprintf("[Trait screen | %s | %s] design model + %d trait refits",
+    progress_log(sprintf("[Trait screen | %s | %s] full-model random selection for %d covariates",
                          stage, oc_key, length(avail_vars)))
-
-    # Base design model: reuse the primary Section-7 fit when available, else fit.
-    base_model <- NULL
-    if (exists("all_stage_models") && !is.null(all_stage_models[[stage]]) &&
-        !is.null(all_stage_models[[stage]][[oc$main_name]])) {
-      base_model <- all_stage_models[[stage]][[oc$main_name]]
-      progress_log("  Reusing primary design model from Section 7.", indent = 1)
-    }
-    if (is.null(base_model) && !is.null(getOption("ug.trait_model_root"))) {
-      model_path <- file.path(getOption("ug.trait_model_root"), "Behavior",
-                              paste0(stage, "_TwoStage_Bates"), oc$main_name,
-                              paste0("final_model_", oc$main_name, ".rds"))
-      if (!file.exists(model_path)) stop("Missing revised primary model: ", model_path)
-      base_model <- readRDS(model_path)
-      progress_log(paste("Reusing verified revised primary model:", model_path), indent = 1)
-    }
-    if (is.null(base_model)) {
-      base_model <- tryCatch(
-        fit_stage1_bates(df_merged, response, trait_design_fixed,
-                         trait_design_include, oc$family,
-                         random_max_vars = trait_random_vars,
-                         group_name = "participant_id_internal",
-                         timeout_sec = trait_timeout_sec),
-        error = function(e) {
-          progress_log(sprintf("  base fit failed: %s", conditionMessage(e)), indent = 1)
-          NULL
-        })
-    }
-    if (is.null(base_model)) {
-      progress_log(sprintf("[Trait screen | %s | %s] no base model; skipping outcome.",
-                           stage, oc_key))
-      trait_outcome_status[[oc_key]] <- c(
-        passed = 0L, attempted = length(avail_vars)
-      )
-      for (v in avail_vars) {
-        comp_dir <- file.path(out_oc, paste0("Trait_", v))
-        write_trait_failure(
-          comp_dir, oc_key, v, stage, NULL,
-          "The primary design model did not pass its acceptance gate."
-        )
-      }
-      write_empty_trait_summary(out_oc, oc_key, stage)
-      next
-    }
-    re_string <- trait_re_string(base_model)
 
     rows <- list()
     for (v in avail_vars) {
@@ -3679,11 +3632,27 @@ for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_s
       n_used <- nrow(sub)
       n_drop <- nrow(df_merged) - n_used
       n_subj <- dplyr::n_distinct(sub$participant_id_internal)
-      f_v <- stats::as.formula(sprintf("%s ~ %s + %s + %s",
-                                       response, trait_design_fixed, vz, re_string))
+      f_v <- NULL  # Set only after selection succeeds; do not invent a failed formula.
       fit_error <- NA_character_
       fit <- tryCatch(
-        fit_trait_model_validated(f_v, sub, oc$family),
+        {
+          selected <- fit_stage1_bates(
+            sub, response, paste(trait_design_fixed, vz, sep = " + "),
+            c(trait_design_include, vz), oc$family,
+            random_max_vars = trait_random_vars,
+            group_name = "participant_id_internal",
+            timeout_sec = trait_timeout_sec
+          )
+          f_v <- stats::formula(selected)
+          fitted <- fit_trait_model_validated(f_v, sub, oc$family)
+          attr(fitted, "bates_diag") <- attr(selected, "bates_diag")
+          saveRDS(fitted, file.path(comp_dir, "final_model_trait.rds"))
+          saveRDS(attr(selected, "bates_diag"),
+                  file.path(comp_dir, "random_selection_diagnostics.rds"))
+          writeLines(capture.output(str(attr(selected, "bates_diag"))),
+                     file.path(comp_dir, "random_selection_diagnostics.txt"))
+          fitted
+        },
         error = function(e) {
           fit_error <<- conditionMessage(e)
           progress_log(sprintf("  [%s] fit failed: %s", v, fit_error), indent = 1)
@@ -3835,7 +3804,7 @@ for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_s
       sprintf("Outcome: %s (%s). Each row adds one z-scored variable as a main",
               response, oc$family),
       "effect to the primary design model (emotion x offer_type) with the",
-      "design-selected random structure. Effects are per +1 SD of the variable.",
+      "random structure selected for that full model. Effects are per +1 SD.",
       "p_FDR = Benjamini-Hochberg within family (SVO / PID5BF+ / Ratings).",
       "EXPLORATORY; main-effect only; n ~= 30. See per-variable folders for full",
       "ANOVA and coefficient tables.",
@@ -3857,7 +3826,7 @@ for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_s
   cat("Per-experiment, exploratory, MAIN-EFFECT-ONLY screen.\n")
   cat("Outcomes:", paste(names(trait_outcomes), collapse = ", "), "\n")
   cat("Fixed design:", trait_design_fixed, "+ <var>_z\n")
-  cat("Random structure: inherited from the primary Section-7 design model per outcome.\n")
+  cat("Random structure: selected separately for each full covariate model using the common five-step procedure; all fixed terms retained.\n")
   cat("Variables (z-scored over the analysis sample,", n_cov_subj, "subjects):\n")
   for (fam in names(trait_families))
     cat(sprintf("  %-8s: %s\n", fam, paste(trait_families[[fam]], collapse = ", ")))
