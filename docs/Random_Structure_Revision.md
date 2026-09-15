@@ -27,7 +27,7 @@ R 4.3.3 and lme4 1.1-38, lmerTest 3.1-3, glmmTMB 1.1.14, buildmer 2.12, emmeans 
 
 ## Validation status
 
-All 25 model-specific input/fixed-design checks passed through the formal scripts on 2026-09-15. The formal E1 choice fit reproduced the earlier controlled refit exactly in its final formula, fixed estimates, fixed covariance matrix and log likelihood, and passed the Hessian check. Full remaining fit/output validation is in progress; input checks alone do not establish full numerical reproduction.
+All 25 model-specific input/fixed-design checks passed through the formal scripts on 2026-09-15. All 24 accepted models completed formal reproduction: eight behavioral models and 16 offer-locked EEG models (Alday and Traditional, E1 and E2). Each agrees exactly with its earlier controlled refit in final formula, fixed estimates, the full fixed-effect covariance matrix and log likelihood. These are completed fit comparisons, not input checks alone. The remaining pooled-choice model failed the original numerical gate and is not counted as accepted.
 
 The pooled choice model has a documented non-positive-definite Hessian in the Step 4 ZCP reference under the existing procedure. No optimizer-policy extension is included here. A failed fit must not be reported as an accepted result.
 
@@ -46,4 +46,20 @@ These update the existing actor and trait analyses whose base choice model chang
 
 `Summarize_Actor_Revision.R <actor-run-directory>` exports contrasts and variance components from saved actor models without fitting. It repairs the original export's incompatible columns between marginal and within-offer contrast tables. The September 15 actor run saved all fits before that export error; the repaired summaries and a reconstructed frame audit are recorded in its `REPRODUCIBILITY.txt`. The actor-intercept fit passed; the actor-expression-slope fit failed and is not interpreted. The E1 trait screen yielded valid fits for seven rejection predictors and all ten RT predictors; rejection models for Antagonism, Rating_2 and Rating_3 failed the original numerical gate.
 
-Formal behavior fits for all six E1/E2 models and all four E1 Alday ERP models have been compared with their controlled refits: final formulas, fixed estimates, covariance matrices and log likelihoods agree exactly. Further EEG reproduction is in progress. The behavior render outputs completed before their original wrapper processes hit a trailing parse error caused by editing the streamed entrypoint during execution. The saved results were independently checked; no fit was repeated to hide that wrapper error. The entrypoint now parses its whole body in `local({})` before starting the long render. Do not edit scripts while they are running.
+The behavior render outputs completed before their original wrapper processes hit a trailing parse error caused by editing the streamed entrypoint during execution. The saved results were independently checked; no fit was repeated to hide that wrapper error. The entrypoint now parses its whole body in `local({})` before starting the long render. Do not edit scripts while they are running.
+
+
+## Completed formal run directories
+
+All paths below are relative to the project root. Each contains its own run receipt and rendered report. The formal-equality tables are also included in the manuscript review package model-output archive.
+
+| Analysis | Run directory |
+|---|---|
+| Behavior E1 | results/RandomStructure_Behavior_E1_all_fit_20260915_145148 |
+| Behavior E2 | results/RandomStructure_Behavior_E2_all_fit_20260915_145442 |
+| Pooled main RT | results/RandomStructure_Behavior_Integrative_LMM_RT_main_fit_20260915_152535 |
+| Pooled unfair-only RT | results/RandomStructure_Behavior_Integrative_LMM_RT_unfair_fit_20260915_153342 |
+| Alday E1 | results/RandomStructure_Alday_E1_all_fit_20260915_150647 |
+| Alday E2 | results/RandomStructure_Alday_E2_all_fit_20260915_151913 |
+| Traditional E1 | results/RandomStructure_Traditional_E1_all_fit_20260915_153705 |
+| Traditional E2 | results/RandomStructure_Traditional_E2_all_fit_20260915_154723 |
