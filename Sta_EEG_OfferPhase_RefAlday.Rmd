@@ -30,6 +30,11 @@ knitr::opts_chunk$set(
 options(scipen = 999, digits = 4)
 set.seed(2024)
 
+# Version each run; original result directories remain reference inputs.
+run_id <- getOption("ug.run_id", format(Sys.time(), "RandomStructure_%Y%m%d_%H%M%S"))
+run_root <- here::here("results", run_id)
+source(here::here("config", "random_structure_revision.R"), local = TRUE)
+
 # Sum-to-zero contrasts: required for valid Type III ANOVA in the presence of
 # interactions, and for interpretable zero-correlation random-effect parameterizations.
 # Reference: Schad, Vasishth, Hohenstein, & Kliegl (2020) on contrast coding.
@@ -39,7 +44,7 @@ options(contrasts = c("contr.sum", "contr.poly"))
 # Global Settings & Analysis Targets (SINGLE SOURCE OF TRUTH)
 # ------------------------------------------------------------------------------
 # Set experiment version to match upstream preprocessing pipeline output.
-experiment_version <- "E2"  # Options: "E1" or "E2"
+experiment_version <- getOption("ug.experiment", "E2")  # "E1" or "E2"
 
 # ------------------------------------------------------------------------------
 # Stage 2 covariate handling (revised 2026-06).
@@ -121,7 +126,7 @@ comp_def <- readr::read_csv(comp_csv, show_col_types = FALSE)
 comp_def <- comp_def[comp_def$experiment == experiment_version, ]
 confirmatory_components <- comp_def$comp_name[comp_def$role == "confirmatory"]
 exploratory_components  <- comp_def$comp_name[comp_def$role == "exploratory"]
-analyze_stim_components <- c(confirmatory_components, exploratory_components)
+analyze_stim_components <- getOption("ug.components", c(confirmatory_components, exploratory_components))
 
 # Helper to return component status for downstream reporting.
 component_status <- function(comp_name) {
@@ -183,7 +188,7 @@ options(pbkrtest.limit = 1e7)
 
 # Output directory tree. EEG Stage 2 now keeps ONLY the rating nuisance-covariate
 # control (trait moderation has moved to the behavioral analysis).
-out_root            <- here("results", "EEG", paste0(experiment_version, "_TwoStage_Bates_Alday"))
+out_root            <- file.path(run_root, "EEG", paste0(experiment_version, "_TwoStage_Bates_Alday"))
 out_stage1          <- file.path(out_root, "Stage1_TrialLevel")
 out_stage2          <- file.path(out_root, "Stage2_RatingControl")
 out_stage2_covctrl  <- file.path(out_stage2, "Covariate_Control_Ratings")
@@ -257,25 +262,40 @@ write_input_provenance <- function(provenance) {
 }
 
 add_random_contrast_columns <- function(data, random_vars, group_name) {
-  random_terms <- character(0)
-  random_columns <- character(0)
-  random_blocks <- character(0)
-  for (random_var in random_vars) {
-    x <- data[[random_var]]
-    if (!is.factor(x)) stop("Random-slope variable must be a factor: ", random_var)
-    mm <- model.matrix(
-      reformulate(random_var), data = data,
-      contrasts.arg = setNames(list(contr.sum(nlevels(x))), random_var)
-    )[, -1, drop = FALSE]
-    for (j in seq_len(ncol(mm))) {
-      column_name <- sprintf("RE_%s_%d", random_var, j)
-      data[[column_name]] <- mm[, j]
+  # Include the full factorial of the specified within-participant variables.
+  # Numeric sum-contrast columns make both main and interaction ZCP blocks diagonal.
+  stopifnot(length(random_vars) > 0L, !anyDuplicated(random_vars))
+  if (!all(c(random_vars, group_name) %in% names(data))) {
+    stop("Missing random-design or grouping variable.")
+  }
+  design_data <- data[random_vars]
+  contrast_args <- list()
+  for (v in random_vars) {
+    x <- design_data[[v]]
+    if (anyNA(x)) stop("Missing values in random-design variable: ", v)
+    if (is.factor(x)) {
+      if (nlevels(x) < 2L) stop("Random-design factor has fewer than two levels: ", v)
+      contrast_args[[v]] <- contr.sum(nlevels(x))
+    } else if (is.numeric(x)) {
+      if (any(!is.finite(x))) stop("Non-finite random-design variable: ", v)
+      design_data[[v]] <- x - mean(x)
+    } else stop("Unsupported random-slope variable type: ", v)
+  }
+  design_formula <- reformulate(paste(random_vars, collapse = " * "))
+  mm <- model.matrix(design_formula, data = design_data,
+                     contrasts.arg = if (length(contrast_args)) contrast_args else NULL)
+  assignments <- attr(mm, "assign")
+  labels <- attr(terms(design_formula), "term.labels")
+  random_terms <- random_columns <- random_blocks <- character(0)
+  for (k in seq_along(labels)) {
+    indices <- which(assignments == k)
+    term_name <- gsub(":", "_x_", labels[k], fixed = TRUE)
+    for (j in seq_along(indices)) {
+      column_name <- sprintf("RE_%s_%d", term_name, j)
+      data[[column_name]] <- mm[, indices[j]]
       random_columns <- c(random_columns, column_name)
-      random_blocks[column_name] <- paste0(random_var, "_slope_block")
-      random_terms <- c(
-        random_terms,
-        sprintf("(0 + %s | %s)", column_name, group_name)
-      )
+      random_blocks[column_name] <- paste0(term_name, "_slope_block")
+      random_terms <- c(random_terms, sprintf("(0 + %s | %s)", column_name, group_name))
     }
   }
   list(data = data, random_terms = random_terms,
@@ -1297,7 +1317,7 @@ add_correlations_step4 <- function(model_zcp_reduced, fixed_str, data, alpha_lrt
 # Main Stage 1 engine: full Bates 5-step pipeline + Alday 2.5 fixed structure.
 # Returns the fitted model with diagnostic attributes attached.
 # ==============================================================================
-fit_stage1_bates <- function(data, erp_name) {
+fit_stage1_bates <- function(data, erp_name, fixed_formula = NULL) {
   
   fixed_str <- sprintf("%s ~ (emotion + offer_type + Baseline_c)^2", erp_name)
   random_design <- add_random_contrast_columns(
@@ -1315,6 +1335,18 @@ fit_stage1_bates <- function(data, erp_name) {
     "~ emotion + offer_type + Baseline_c + emotion:offer_type + (1 | participant_id)"
   )
   
+  # Review mode: keep the saved reference model's entire fixed structure.
+  # Do not reselect baseline interactions while evaluating random slopes.
+  if (!is.null(fixed_formula)) {
+    stopifnot(inherits(fixed_formula, "formula"),
+              identical(all.vars(fixed_formula[[2]]), erp_name))
+    fixed_formula <- lme4::nobars(fixed_formula)
+    stopifnot(attr(terms(fixed_formula), "intercept") == 1L)
+    fixed_str <- paste(deparse(fixed_formula, width.cutoff = 500L), collapse = " ")
+    fixed_include <- reformulate(c(attr(terms(fixed_formula), "term.labels"),
+                                   "(1 | participant_id)"))
+  }
+
   diag_log <- list(
     component = erp_name,
     n_obs = nrow(data),
@@ -1329,7 +1361,7 @@ fit_stage1_bates <- function(data, erp_name) {
     step5_pca = NULL
   )
   
-  # ---- STEP 1: Barr-style maximal model (main-effects random slopes only). ----
+  # ---- STEP 1: Barr-style maximal model (including within-factor interaction slopes). ----
   progress_log(sprintf("[%s] Stage 1: Bates 5-step random-structure selection",
                        erp_name))
   progress_log(sprintf("Data: N = %d trials, %d subjects.",
@@ -1341,6 +1373,8 @@ fit_stage1_bates <- function(data, erp_name) {
     paste(random_design$random_columns, collapse = " + ")
   )
   f_max <- as.formula(paste(fixed_str, "+", random_max))
+  diag_log$step1_formula <- paste(deparse(f_max), collapse = " ")
+  progress_log(diag_log$step1_formula, indent = 2)
   
   progress_log("[Step 1] Fitting design-justified maximal model with correlations...",
                indent = 1)
@@ -1383,6 +1417,8 @@ fit_stage1_bates <- function(data, erp_name) {
     collapse = " + "
   )
   f_zcp <- as.formula(paste(fixed_str, "+", random_zcp))
+  diag_log$step2_formula <- paste(deparse(f_zcp), collapse = " ")
+  progress_log(diag_log$step2_formula, indent = 2)
   blocked_terms <- make_blocked_buildmer_terms(
     f_zcp, random_design$random_blocks
   )
@@ -1623,7 +1659,9 @@ run_stage1_component <- function(data, erp_name, out_dir, exp_version) {
                        dplyr::n_distinct(data$participant_id), nrow(data)))
   
   # ---- Fit Stage 1 model via Bates 5-step pipeline. ----
-  FINAL_MODEL <- fit_stage1_bates(data, erp_name)
+  fixed_formula <- revision_reference(data, paste("Alday", exp_version, erp_name, sep = "__"), comp_dir)
+  if (isTRUE(getOption("ug.preflight_only", FALSE))) return(NULL)
+  FINAL_MODEL <- fit_stage1_bates(data, erp_name, fixed_formula = fixed_formula)
   diag_log <- attr(FINAL_MODEL, "bates_diag")
   
   formula_str <- paste(deparse(formula(FINAL_MODEL)), collapse = " ")
@@ -2232,7 +2270,7 @@ if (file.exists(path_stim)) {
       
       # Baseline balance pre-check (diagnostic only; does not gate analysis).
       # Output to Supplementary/baseline_balance/<component>_baseline_balance.md.
-      pre_check_baseline_balance(
+      if (isTRUE(getOption("ug.run_baseline_diagnostics", TRUE))) pre_check_baseline_balance(
         data     = df_comp,
         comp_name = comp_name,
         out_dir   = file.path(out_suppl, "baseline_balance")
@@ -2431,7 +2469,8 @@ run_covariate_control_check <- function(stage1_models, stage1_data, df_traits,
 }
 
 # ---- Track C: Ratings as nuisance covariates (main-effect control model) ----
-if (length(stage1_models) > 0 && length(stage1_data) > 0 && !is.null(df_covs)) {
+if (isTRUE(getOption("ug.run_rating_control", TRUE)) &&
+    length(stage1_models) > 0 && length(stage1_data) > 0 && !is.null(df_covs)) {
   run_covariate_control_check(
     stage1_models = stage1_models,
     stage1_data   = stage1_data,
@@ -2553,28 +2592,23 @@ writeLines(c(
   "",
   "### Fixed-effect specification (Alday Tier 2.5)",
   "",
-  "For each component, the fixed-effect search space was the pairwise",
-  "interaction model: amplitude ~ (emotion + offer_type + Baseline_c)^2.",
-  "Theoretically core terms (emotion, offer_type, Baseline_c, and the",
-  "emotion:offer_type interaction) were forced to be retained via",
-  "buildmer's 'include' argument; baseline-by-condition interactions",
-  "(Baseline_c:emotion, Baseline_c:offer_type) were subjected to LRT-",
-  "based inclusion testing within the same buildmer call. The final",
-  "fixed structure may therefore differ across components, reflecting",
-  "genuine differences in baseline-condition coupling.",
+  "The previously selected fixed formula for each experiment and component",
+  "was retained from config/random_structure_revision.R, including its",
+  "baseline-by-condition terms. All fixed terms were held constant while",
+  "the random-effects candidate set was expanded to include interaction slopes.",
   "",
   "### Random-effects structure",
   "",
   "Random-effects structures were selected following the parsimonious-",
   "Bates protocol (Bates, Kliegl, Vasishth, & Baayen, 2015; Matuschek,",
   "Kliegl, Vasishth, Baayen, & Bates, 2017). For each component:",
-  "Step 1 specified a maximal model with main-effect random slopes and",
-  "full correlations (interaction random slopes were omitted because",
-  "cell-level variance components rarely identify in single-trial EEG",
-  "with typical N). Step 2 fitted a zero-correlation-parameter (ZCP)",
+  "Step 1 included within-participant main-effect and interaction random slopes with",
+  "full correlations; unsupported variance components were evaluated during",
+  "random-structure selection",
+  "using the recorded candidate models. Step 2 fitted a zero-correlation-parameter (ZCP)",
   "model using separate sum-contrast columns for factor slopes, making",
   "the ZCP variance terms genuinely diagonal. All contrast columns for",
-  "one factor were evaluated as one buildmer selection block. Step 3 used buildmer",
+  "one main or interaction term were evaluated as one buildmer selection block. Step 3 used buildmer",
   "LRT-based backward elimination at",
   "alpha = 0.20 (Matuschek et al., 2017). Step 4 tested whether adding",
   "correlation parameters improved fit. Step 5 ran rePCA dimensionality",
@@ -2705,9 +2739,10 @@ cat(sprintf("[Methods] Auto-generated paragraph: %s\n", methods_path))
 # ==============================================================================
 # 9. Session Information
 # ==============================================================================
-sink(file.path(out_root, "SESSION_INFO.txt"))
-print(sessionInfo())
-sink()
+writeLines(
+  capture.output(sessionInfo()),
+  file.path(out_root, "SESSION_INFO.txt")
+)
 
 cat(sprintf("\n========================================\n   %s pipeline complete.\n   Output: %s\n========================================\n",
             experiment_version, out_root))

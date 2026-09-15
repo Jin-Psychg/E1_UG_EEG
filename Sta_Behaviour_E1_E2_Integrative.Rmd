@@ -31,6 +31,11 @@ knitr::opts_chunk$set(
 options(scipen = 999, digits = 4)
 set.seed(2024)
 
+# Version each run; original result directories remain reference inputs.
+run_id <- getOption("ug.run_id", format(Sys.time(), "RandomStructure_%Y%m%d_%H%M%S"))
+run_root <- here::here("results", run_id)
+source(here::here("config", "random_structure_revision.R"), local = TRUE)
+
 # Sum-to-zero contrasts: required for valid Type III ANOVA in the presence of
 # interactions, and for interpretable zero-correlation random-effect
 # parameterizations.
@@ -49,7 +54,7 @@ options(contrasts = c("contr.sum", "contr.poly"))
 #                experiments. E1 uses "Vp" prefix in raw ids; E2 uses "VP"
 #                prefix. Both are case-sensitive but the Mega prefix makes
 #                this irrelevant.
-stages_to_run <- c("E1", "E2", "Integrative")
+stages_to_run <- getOption("ug.stages", c("E1", "E2", "Integrative"))
 
 # Behavioral analyses to run within each stage. Each is a separate model fit.
 # Single-experiment stages (E1, E2):
@@ -62,7 +67,7 @@ stages_to_run <- c("E1", "E2", "Integrative")
 # (3-way interaction). Reaction is NOT a covariate in LMM_RT_main; that is
 # downstream of emotion x offer_type and conditioning on it would induce
 # collider bias (Rohrer, 2018, AMPPS).
-analyses_to_run <- c("GLMM_rejection", "LMM_RT_main", "LMM_RT_unfair")
+analyses_to_run <- getOption("ug.analyses", c("GLMM_rejection", "LMM_RT_main", "LMM_RT_unfair"))
 
 # Behavioral data filtering thresholds.
 rt_lower_ms <- 300
@@ -130,7 +135,7 @@ buildmer_timeout_map <- list(
 )
 
 # Output directory tree (one root, three stage-specific branches).
-out_root_base <- here("results", "Behavior")
+out_root_base <- file.path(run_root, "Behavior")
 if (!dir.exists(out_root_base)) dir.create(out_root_base, recursive = TRUE)
 
 cat(sprintf("Behavioral pipeline initialized.\nStages: %s\nAnalyses (per stage): %s\nRT filter: %d-%d ms\nOutput root: %s\n",
@@ -327,41 +332,44 @@ fit_glmm_candidate <- function(formula, data, control, optimizer_label) {
 # create a correlated dummy-level block and can be redundant with (1 | id).
 # Here each sum-contrast column receives its own one-dimensional random term.
 add_random_contrast_columns <- function(data, random_vars, group_name) {
-  random_terms <- character(0)
-  random_columns <- character(0)
-  random_blocks <- character(0)
-  for (random_var in random_vars) {
-    x <- data[[random_var]]
+  # Include the full factorial of the specified within-participant variables.
+  # Numeric sum-contrast columns make both main and interaction ZCP blocks diagonal.
+  stopifnot(length(random_vars) > 0L, !anyDuplicated(random_vars))
+  if (!all(c(random_vars, group_name) %in% names(data))) {
+    stop("Missing random-design or grouping variable.")
+  }
+  design_data <- data[random_vars]
+  contrast_args <- list()
+  for (v in random_vars) {
+    x <- design_data[[v]]
+    if (anyNA(x)) stop("Missing values in random-design variable: ", v)
     if (is.factor(x)) {
-      contrast_arg <- setNames(
-        list(contr.sum(nlevels(x))), random_var
-      )
-      mm <- model.matrix(
-        reformulate(random_var), data = data,
-        contrasts.arg = contrast_arg
-      )[, -1, drop = FALSE]
+      if (nlevels(x) < 2L) stop("Random-design factor has fewer than two levels: ", v)
+      contrast_args[[v]] <- contr.sum(nlevels(x))
     } else if (is.numeric(x)) {
-      mm <- matrix(x - mean(x, na.rm = TRUE), ncol = 1)
-    } else {
-      stop("Unsupported random-slope variable type: ", random_var)
-    }
-    for (j in seq_len(ncol(mm))) {
-      column_name <- sprintf("RE_%s_%d", random_var, j)
-      data[[column_name]] <- mm[, j]
+      if (any(!is.finite(x))) stop("Non-finite random-design variable: ", v)
+      design_data[[v]] <- x - mean(x)
+    } else stop("Unsupported random-slope variable type: ", v)
+  }
+  design_formula <- reformulate(paste(random_vars, collapse = " * "))
+  mm <- model.matrix(design_formula, data = design_data,
+                     contrasts.arg = if (length(contrast_args)) contrast_args else NULL)
+  assignments <- attr(mm, "assign")
+  labels <- attr(terms(design_formula), "term.labels")
+  random_terms <- random_columns <- random_blocks <- character(0)
+  for (k in seq_along(labels)) {
+    indices <- which(assignments == k)
+    term_name <- gsub(":", "_x_", labels[k], fixed = TRUE)
+    for (j in seq_along(indices)) {
+      column_name <- sprintf("RE_%s_%d", term_name, j)
+      data[[column_name]] <- mm[, indices[j]]
       random_columns <- c(random_columns, column_name)
-      random_blocks[column_name] <- paste0(random_var, "_slope_block")
-      random_terms <- c(
-        random_terms,
-        sprintf("(0 + %s | %s)", column_name, group_name)
-      )
+      random_blocks[column_name] <- paste0(term_name, "_slope_block")
+      random_terms <- c(random_terms, sprintf("(0 + %s | %s)", column_name, group_name))
     }
   }
-  list(
-    data = data,
-    random_terms = random_terms,
-    random_columns = random_columns,
-    random_blocks = random_blocks
-  )
+  list(data = data, random_terms = random_terms,
+       random_columns = random_columns, random_blocks = random_blocks)
 }
 
 # Buildmer's documented terms-list interface allows the k - 1 contrast columns
@@ -1212,9 +1220,8 @@ check_uniqueness <- function(df, context_name) {
 # stage-appropriate uniquified id). This is set by the loader functions.
 #
 # RANDOM-EFFECT STRUCTURE (Bates 2015 / Matuschek 2017):
-#   Step 1: Maximal model (1 + <random_max_vars sum> | participant_id_internal)
-#           Interaction random slope omitted by design (typically unidentifiable
-#           with N_subjects ~30-60 in single-trial data).
+#   Step 1: Full factorial random slopes for random_max_vars, with correlations.
+#           Interaction slopes are candidates; diagnostics and selection determine retention.
 #   Step 2: Zero-correlation-parameter (ZCP) model
 #   Step 3: LRT-based backward elimination (alpha = 0.20, Matuschek et al. 2017)
 #   Step 4: Re-test correlation parameters on surviving slopes
@@ -1598,6 +1605,8 @@ fit_stage1_bates <- function(data, outcome_var, fixed_terms, include_terms,
                        maximal_diagnostic_timeout_sec), indent = 1)
   
   f_max <- as.formula(paste(fixed_str, "+", random_max_str))
+  diag_log$step1_formula <- paste(deparse(f_max), collapse = " ")
+  progress_log(diag_log$step1_formula, indent = 2)
   
   progress_log("[Step 1] Fitting design-justified maximal model with correlations...",
                indent = 1)
@@ -1650,6 +1659,8 @@ fit_stage1_bates <- function(data, outcome_var, fixed_terms, include_terms,
   )
   random_zcp <- paste(zcp_components, collapse = " + ")
   f_zcp <- as.formula(paste(fixed_str, "+", random_zcp))
+  diag_log$step2_formula <- paste(deparse(f_zcp), collapse = " ")
+  progress_log(diag_log$step2_formula, indent = 2)
   blocked_terms <- make_blocked_buildmer_terms(
     f_zcp, random_design$random_blocks
   )
@@ -3075,6 +3086,12 @@ for (stage in stages_to_run) {
       next
     }
     
+    # Verify freshly loaded data against the original fit before selection.
+    reference_fixed <- revision_reference(config$data, paste("Behavior", stage, a_name, sep = "__"), config$out)
+    stopifnot(setequal(attr(terms(reference_fixed), "term.labels"),
+                       attr(terms(as.formula(paste(config$outcome, "~", config$fixed_terms))), "term.labels")))
+    if (isTRUE(getOption("ug.preflight_only", FALSE))) next
+
     # ---- Dispatch to 2-way or 3-way runner ----
     fit <- tryCatch({
       if (config$mode == "2way") {
@@ -3217,11 +3234,11 @@ and were therefore not used for this purpose.
 Random-effects structures were selected following the parsimonious-Bates
 protocol (Bates, Kliegl, Vasishth, & Baayen, 2015; Matuschek, Kliegl,
 Vasishth, Baayen, & Bates, 2017). Starting from the design-justified maximal
-model (random intercepts and slopes for within-subject factors by
-participant), zero-correlation parameter (ZCP) models were fitted by
+model (random intercepts and slopes for within-subject factors and their
+interaction by participant), zero-correlation parameter (ZCP) models were fitted by
 representing factor slopes as separate sum-contrast columns, so that the ZCP
 terms were genuinely diagonal rather than correlated dummy-level blocks.
-All contrast columns belonging to one factor were grouped as one buildmer
+All contrast columns belonging to one main or interaction term were grouped as one buildmer
 selection block through the documented buildmer terms-list interface.
 Unsupported variance-component blocks were removed via likelihood-ratio tests
 with elimination alpha = 0.20 using the buildmer package. Correlation
@@ -3531,7 +3548,7 @@ trait_coef_row <- function(model, vz) {
 # ---- Screen loop --------------------------------------------------------------
 trait_screen_summaries <- list()
 
-for (stage in trait_screen_stages) {
+for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_stages else character()) {
   progress_log(sprintf("\n%s\n>>> TRAIT MAIN-EFFECT SCREEN: %s\n%s",
                        strrep("=", 70), stage, strrep("=", 70)))
 
@@ -3865,9 +3882,10 @@ cat("\n>>> Trait main-effect screen complete.\n")
 # ==============================================================================
 # 8. Session Information
 # ==============================================================================
-sink(file.path(out_root_base, "SESSION_INFO.txt"))
-print(sessionInfo())
-sink()
+writeLines(
+  capture.output(sessionInfo()),
+  file.path(out_root_base, "SESSION_INFO.txt")
+)
 
 cat("\n>>> Session info written to:", file.path(out_root_base, "SESSION_INFO.txt"), "\n")
 sessionInfo()

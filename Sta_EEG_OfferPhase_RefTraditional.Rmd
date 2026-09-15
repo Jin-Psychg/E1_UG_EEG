@@ -30,6 +30,11 @@ knitr::opts_chunk$set(
 options(scipen = 999, digits = 4)
 set.seed(2024)
 
+# Version each run; original result directories remain reference inputs.
+run_id <- getOption("ug.run_id", format(Sys.time(), "RandomStructure_%Y%m%d_%H%M%S"))
+run_root <- here::here("results", run_id)
+source(here::here("config", "random_structure_revision.R"), local = TRUE)
+
 # Sum-to-zero contrasts: required for valid Type III ANOVA in the presence of
 # interactions, and for interpretable zero-correlation random-effect parameterizations.
 # Reference: Schad, Vasishth, Hohenstein, & Kliegl (2020) on contrast coding.
@@ -39,7 +44,7 @@ options(contrasts = c("contr.sum", "contr.poly"))
 # Global Settings & Analysis Targets (SINGLE SOURCE OF TRUTH)
 # ------------------------------------------------------------------------------
 # Set experiment version to match upstream preprocessing pipeline output.
-experiment_version <- "E2"  # Options: "E1" or "E2"
+experiment_version <- getOption("ug.experiment", "E2")  # "E1" or "E2"
 
 # ------------------------------------------------------------------------------
 # Stage 2 covariate handling (revised 2026-06). Trait MODERATION (SVO + the six
@@ -103,7 +108,7 @@ comp_def <- readr::read_csv(comp_csv, show_col_types = FALSE)
 comp_def <- comp_def[comp_def$experiment == experiment_version, ]
 confirmatory_components <- comp_def$comp_name[comp_def$role == "confirmatory"]
 exploratory_components  <- comp_def$comp_name[comp_def$role == "exploratory"]
-analyze_stim_components <- c(confirmatory_components, exploratory_components)
+analyze_stim_components <- getOption("ug.components", c(confirmatory_components, exploratory_components))
 
 # Helper to return component status for downstream reporting.
 component_status <- function(comp_name) {
@@ -164,7 +169,7 @@ options(lmerTest.limit = 1e7)
 options(pbkrtest.limit = 1e7)
 
 # Output directory tree organized by analytic stage and reporting target.
-out_root            <- here("results", "EEG", paste0(experiment_version, "_TwoStage_Bates_Traditional"))
+out_root            <- file.path(run_root, "EEG", paste0(experiment_version, "_TwoStage_Bates_Traditional"))
 out_stage1          <- file.path(out_root, "Stage1_TrialLevel")
 out_stage2          <- file.path(out_root, "Stage2_RatingControl")
 out_stage2_covctrl  <- file.path(out_stage2, "Covariate_Control_Ratings")
@@ -236,25 +241,40 @@ write_input_provenance <- function(provenance) {
 }
 
 add_random_contrast_columns <- function(data, random_vars, group_name) {
-  random_terms <- character(0)
-  random_columns <- character(0)
-  random_blocks <- character(0)
-  for (random_var in random_vars) {
-    x <- data[[random_var]]
-    if (!is.factor(x)) stop("Random-slope variable must be a factor: ", random_var)
-    mm <- model.matrix(
-      reformulate(random_var), data = data,
-      contrasts.arg = setNames(list(contr.sum(nlevels(x))), random_var)
-    )[, -1, drop = FALSE]
-    for (j in seq_len(ncol(mm))) {
-      column_name <- sprintf("RE_%s_%d", random_var, j)
-      data[[column_name]] <- mm[, j]
+  # Include the full factorial of the specified within-participant variables.
+  # Numeric sum-contrast columns make both main and interaction ZCP blocks diagonal.
+  stopifnot(length(random_vars) > 0L, !anyDuplicated(random_vars))
+  if (!all(c(random_vars, group_name) %in% names(data))) {
+    stop("Missing random-design or grouping variable.")
+  }
+  design_data <- data[random_vars]
+  contrast_args <- list()
+  for (v in random_vars) {
+    x <- design_data[[v]]
+    if (anyNA(x)) stop("Missing values in random-design variable: ", v)
+    if (is.factor(x)) {
+      if (nlevels(x) < 2L) stop("Random-design factor has fewer than two levels: ", v)
+      contrast_args[[v]] <- contr.sum(nlevels(x))
+    } else if (is.numeric(x)) {
+      if (any(!is.finite(x))) stop("Non-finite random-design variable: ", v)
+      design_data[[v]] <- x - mean(x)
+    } else stop("Unsupported random-slope variable type: ", v)
+  }
+  design_formula <- reformulate(paste(random_vars, collapse = " * "))
+  mm <- model.matrix(design_formula, data = design_data,
+                     contrasts.arg = if (length(contrast_args)) contrast_args else NULL)
+  assignments <- attr(mm, "assign")
+  labels <- attr(terms(design_formula), "term.labels")
+  random_terms <- random_columns <- random_blocks <- character(0)
+  for (k in seq_along(labels)) {
+    indices <- which(assignments == k)
+    term_name <- gsub(":", "_x_", labels[k], fixed = TRUE)
+    for (j in seq_along(indices)) {
+      column_name <- sprintf("RE_%s_%d", term_name, j)
+      data[[column_name]] <- mm[, indices[j]]
       random_columns <- c(random_columns, column_name)
-      random_blocks[column_name] <- paste0(random_var, "_slope_block")
-      random_terms <- c(
-        random_terms,
-        sprintf("(0 + %s | %s)", column_name, group_name)
-      )
+      random_blocks[column_name] <- paste0(term_name, "_slope_block")
+      random_terms <- c(random_terms, sprintf("(0 + %s | %s)", column_name, group_name))
     }
   }
   list(data = data, random_terms = random_terms,
@@ -372,18 +392,28 @@ run_buildmer_protected <- function(buildmer_fn, ..., timeout_sec = 1800) {
       buildmer_fn(...)
     }, timeout = timeout_sec, onTimeout = "error")
   }, TimeoutException = function(ex) {
-    progress_log(sprintf("[TIMEOUT] buildmer exceeded %d seconds; aborting.",
-                         timeout_sec), indent = 2)
-    NULL
+    msg <- sprintf("buildmer exceeded %d seconds", timeout_sec)
+    progress_log(sprintf("[TIMEOUT] %s; aborting.", msg), indent = 2)
+    structure(
+      list(type = "timeout", message = msg),
+      class = "buildmer_failure"
+    )
   }, error = function(e) {
-    if (grepl("reached.*time.*limit|timeout", conditionMessage(e), ignore.case = TRUE)) {
+    msg <- conditionMessage(e)
+    if (grepl("reached.*time.*limit|timeout", msg, ignore.case = TRUE)) {
       progress_log(sprintf("[TIMEOUT] buildmer exceeded %d seconds; aborting.",
                            timeout_sec), indent = 2)
-      NULL
+      structure(
+        list(type = "timeout", message = msg),
+        class = "buildmer_failure"
+      )
     } else {
-      progress_log(sprintf("[WARN] buildmer error: %s", conditionMessage(e)),
+      progress_log(sprintf("[WARN] buildmer error: %s", msg),
                    indent = 2)
-      NULL
+      structure(
+        list(type = "error", message = msg),
+        class = "buildmer_failure"
+      )
     }
   })
   
@@ -1268,7 +1298,7 @@ add_correlations_step4 <- function(model_zcp_reduced, fixed_str, data, alpha_lrt
 # Main Stage 1 engine: full Bates 5-step pipeline + Alday 2.5 fixed structure.
 # Returns the fitted model with diagnostic attributes attached.
 # ==============================================================================
-fit_stage1_bates <- function(data, erp_name) {
+fit_stage1_bates <- function(data, erp_name, fixed_formula = NULL) {
   
   # Traditional baseline-subtraction sensitivity analysis: the dependent
   # variable (erp_name) has been baseline-corrected upstream by subtracting
@@ -1291,6 +1321,18 @@ fit_stage1_bates <- function(data, erp_name) {
     "~ emotion + offer_type + emotion:offer_type + (1 | participant_id)"
   )
   
+  # Review mode: keep the saved reference model's entire fixed structure.
+  # Do not reselect baseline interactions while evaluating random slopes.
+  if (!is.null(fixed_formula)) {
+    stopifnot(inherits(fixed_formula, "formula"),
+              identical(all.vars(fixed_formula[[2]]), erp_name))
+    fixed_formula <- lme4::nobars(fixed_formula)
+    stopifnot(attr(terms(fixed_formula), "intercept") == 1L)
+    fixed_str <- paste(deparse(fixed_formula, width.cutoff = 500L), collapse = " ")
+    fixed_include <- reformulate(c(attr(terms(fixed_formula), "term.labels"),
+                                   "(1 | participant_id)"))
+  }
+
   diag_log <- list(
     component = erp_name,
     n_obs = nrow(data),
@@ -1300,12 +1342,13 @@ fit_stage1_bates <- function(data, erp_name) {
     step1_status = NA_character_,
     step1_pca = NULL,
     step2_status = NA_character_,
+    step3_status = NA_character_,
     step3_final_formula = NA_character_,
     step4_status = NA_character_,
     step5_pca = NULL
   )
   
-  # ---- STEP 1: Barr-style maximal model (main-effects random slopes only). ----
+  # ---- STEP 1: Barr-style maximal model (including within-factor interaction slopes). ----
   progress_log(sprintf("[%s] Stage 1: Bates 5-step random-structure selection",
                        erp_name))
   progress_log(sprintf("Data: N = %d trials, %d subjects.",
@@ -1317,6 +1360,8 @@ fit_stage1_bates <- function(data, erp_name) {
     paste(random_design$random_columns, collapse = " + ")
   )
   f_max <- as.formula(paste(fixed_str, "+", random_max))
+  diag_log$step1_formula <- paste(deparse(f_max), collapse = " ")
+  progress_log(diag_log$step1_formula, indent = 2)
   
   progress_log("[Step 1] Fitting design-justified maximal model with correlations...",
                indent = 1)
@@ -1359,6 +1404,8 @@ fit_stage1_bates <- function(data, erp_name) {
     collapse = " + "
   )
   f_zcp <- as.formula(paste(fixed_str, "+", random_zcp))
+  diag_log$step2_formula <- paste(deparse(f_zcp), collapse = " ")
+  progress_log(diag_log$step2_formula, indent = 2)
   blocked_terms <- make_blocked_buildmer_terms(
     f_zcp, random_design$random_blocks
   )
@@ -1428,16 +1475,41 @@ fit_stage1_bates <- function(data, erp_name) {
     timeout_sec = 1800
   )
   
-  if (is.null(bm_res)) {
-    stop("Step 3 buildmer selection failed or timed out; no unvalidated ",
-         "ZCP fallback will be reported.")
+  if (inherits(bm_res, "buildmer_failure")) {
+    terminal_error <- identical(bm_res$type, "error") &&
+      grepl("No terms left for reduction, giving up", bm_res$message, fixed = TRUE)
+
+    if (!terminal_error) {
+      stop("Step 3 buildmer selection failed or timed out: ", bm_res$message,
+           ". No unvalidated ZCP fallback will be reported.")
+    }
+
+    # buildmer 2.12 can throw this terminal error after every removable random
+    # slope has failed its convergence/singularity checks. The analysis already
+    # defines a by-participant random intercept as the minimum viable LMM, so fit
+    # that pre-specified endpoint and subject it to the unchanged downstream
+    # exact-refit and final acceptance gate.
+    progress_log(paste(
+      "[Step 3] buildmer exhausted all removable random slopes;",
+      "fitting the pre-specified random-intercept terminal model."
+    ), indent = 2)
+    f_terminal <- as.formula(paste(fixed_str, "+ (1 | participant_id)"))
+    m_reduced <- tryCatch(
+      lme4::lmer(f_terminal, data = data, REML = FALSE,
+                 control = custom_control),
+      error = function(e) {
+        stop("Random-intercept terminal model failed: ", conditionMessage(e))
+      }
+    )
+    diag_log$step3_status <- "buildmer_terminal_random_intercept"
   } else {
     m_reduced <- tryCatch({
       bm_res@model
     }, error = function(e) {
       stop("Could not extract the buildmer-selected model: ",
-           conditionMessage(e))
+        conditionMessage(e))
     })
+    diag_log$step3_status <- "buildmer_selected"
   }
   
   progress_log(sprintf("[Step 3] elapsed: %s", format_elapsed(t_step3)), indent = 2)
@@ -1599,7 +1671,9 @@ run_stage1_component <- function(data, erp_name, out_dir, exp_version) {
                        dplyr::n_distinct(data$participant_id), nrow(data)))
   
   # ---- Fit Stage 1 model via Bates 5-step pipeline. ----
-  FINAL_MODEL <- fit_stage1_bates(data, erp_name)
+  fixed_formula <- revision_reference(data, paste("Traditional", exp_version, erp_name, sep = "__"), comp_dir)
+  if (isTRUE(getOption("ug.preflight_only", FALSE))) return(NULL)
+  FINAL_MODEL <- fit_stage1_bates(data, erp_name, fixed_formula = fixed_formula)
   diag_log <- attr(FINAL_MODEL, "bates_diag")
   
   formula_str <- paste(deparse(formula(FINAL_MODEL)), collapse = " ")
@@ -1865,6 +1939,7 @@ run_stage1_component <- function(data, erp_name, out_dir, exp_version) {
         nrow(diag_log$step1_pca), "\n")
   }
   cat("Step 2 (ZCP):               ", diag_log$step2_status, "\n")
+  cat("Step 3 status:              ", diag_log$step3_status, "\n")
   cat("Step 3 (LRT reduction):     ", diag_log$step3_final_formula, "\n")
   cat("Step 4 (correlations):      ", diag_log$step4_status, "\n")
   cat("Step 5 (final dims):        ",
@@ -2564,10 +2639,10 @@ writeLines(c(
   "Random-effects structures were selected following the parsimonious-",
   "Bates protocol (Bates, Kliegl, Vasishth, & Baayen, 2015; Matuschek,",
   "Kliegl, Vasishth, Baayen, & Bates, 2017). For each component:",
-  "Step 1 specified a maximal model with main-effect random slopes and",
-  "full correlations (interaction random slopes were omitted because",
-  "cell-level variance components rarely identify in single-trial EEG",
-  "with typical N). Step 2 fitted a zero-correlation-parameter (ZCP)",
+  "Step 1 included within-participant main-effect and interaction random slopes with",
+  "full correlations; unsupported variance components were evaluated during",
+  "random-structure selection",
+  "using the recorded candidate models. Step 2 fitted a zero-correlation-parameter (ZCP)",
   "model using separate sum-contrast columns for factor slopes, making",
   "the ZCP variance terms genuinely diagonal. All contrast columns for",
   "one factor were evaluated as one buildmer selection block. Step 3 used buildmer",
@@ -2670,9 +2745,10 @@ cat(sprintf("[Methods] Auto-generated paragraph: %s\n", methods_path))
 # ==============================================================================
 # 9. Session Information
 # ==============================================================================
-sink(file.path(out_root, "SESSION_INFO.txt"))
-print(sessionInfo())
-sink()
+writeLines(
+  capture.output(sessionInfo()),
+  file.path(out_root, "SESSION_INFO.txt")
+)
 
 cat(sprintf("\n========================================\n   %s pipeline complete.\n   Output: %s\n========================================\n",
             experiment_version, out_root))
