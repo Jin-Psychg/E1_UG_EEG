@@ -32,3 +32,18 @@ All 25 model-specific input/fixed-design checks passed through the formal script
 The pooled choice model has a documented non-positive-definite Hessian in the Step 4 ZCP reference under the existing procedure. No optimizer-policy extension is included here. A failed fit must not be reported as an accepted result.
 
 The Traditional script also contains a previously local, uncommitted dependency: when buildmer 2.12 reports that no removable terms remain, it fits the predefined participant-intercept endpoint and applies the unchanged final gate. This dependency and the existing session-log writing correction are included so the repository reproduces the local code used for the comparison; they were not invented in this revision.
+
+## Dependent E1 analyses
+
+After completing the primary E1 run, use its explicit run directory:
+
+```powershell
+& 'C:/Program Files/R/R-4.3.3/bin/Rscript.exe' --vanilla Run_Actor_Revision.R results/RandomStructure_Behavior_E1_all_fit_20260915_145148
+& 'C:/Program Files/R/R-4.3.3/bin/Rscript.exe' --vanilla Run_Trait_Revision.R results/RandomStructure_Behavior_E1_all_fit_20260915_145148
+```
+
+These update the existing actor and trait analyses whose base choice model changed. The actor runner retains the original sensitivity optimizer sequence and checks fresh data against the revised primary frame. The trait entrypoint renders the original behavior Rmd trait section and reuses its revised base random structure. Each writes to a separate timestamped results directory. A completed render can include failed individual trait fits: inspect their `trait_maineffect.md` status and do not substitute older estimates. The existing family-wise FDR code operates on successfully fitted models.
+
+`Summarize_Actor_Revision.R <actor-run-directory>` exports contrasts and variance components from saved actor models without fitting. It repairs the original export's incompatible columns between marginal and within-offer contrast tables. The September 15 actor run saved all fits before that export error; the repaired summaries and a reconstructed frame audit are recorded in its `REPRODUCIBILITY.txt`. The actor-intercept fit passed; the actor-expression-slope fit failed and is not interpreted. The E1 trait screen yielded valid fits for seven rejection predictors and all ten RT predictors; rejection models for Antagonism, Rating_2 and Rating_3 failed the original numerical gate.
+
+Formal behavior fits for all six E1/E2 models and all four E1 Alday ERP models have been compared with their controlled refits: final formulas, fixed estimates, covariance matrices and log likelihoods agree exactly. Further EEG reproduction is in progress. The behavior render outputs completed before their original wrapper processes hit a trailing parse error caused by editing the streamed entrypoint during execution. The saved results were independently checked; no fit was repeated to hide that wrapper error. The entrypoint now parses its whole body in `local({})` before starting the long render. Do not edit scripts while they are running.

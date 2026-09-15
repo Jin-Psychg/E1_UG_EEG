@@ -3390,7 +3390,7 @@ cat(sprintf("\n\n========================================\n   ALL STAGES COMPLET
 # ==============================================================================
 
 # ---- Configuration ------------------------------------------------------------
-trait_screen_stages <- c("E1", "E2")          # per-experiment only
+trait_screen_stages <- getOption("ug.trait_stages", c("E1", "E2"))  # per-experiment only
 
 trait_families <- list(
   SVO     = c("SVO_angle"),
@@ -3623,6 +3623,14 @@ for (stage in if (isTRUE(getOption("ug.run_trait_screen", TRUE))) trait_screen_s
         !is.null(all_stage_models[[stage]][[oc$main_name]])) {
       base_model <- all_stage_models[[stage]][[oc$main_name]]
       progress_log("  Reusing primary design model from Section 7.", indent = 1)
+    }
+    if (is.null(base_model) && !is.null(getOption("ug.trait_model_root"))) {
+      model_path <- file.path(getOption("ug.trait_model_root"), "Behavior",
+                              paste0(stage, "_TwoStage_Bates"), oc$main_name,
+                              paste0("final_model_", oc$main_name, ".rds"))
+      if (!file.exists(model_path)) stop("Missing revised primary model: ", model_path)
+      base_model <- readRDS(model_path)
+      progress_log(paste("Reusing verified revised primary model:", model_path), indent = 1)
     }
     if (is.null(base_model)) {
       base_model <- tryCatch(

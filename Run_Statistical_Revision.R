@@ -1,3 +1,5 @@
+# Parse the entire entrypoint before starting a long render.
+local({
 # Run from the UG_ERP_Project root with Rscript --vanilla.
 # Usage: Rscript --vanilla Run_Statistical_Revision.R Behavior E1 GLMM_rejection preflight
 # Replace preflight with fit; use all to run all models/components for that experiment.
@@ -53,3 +55,4 @@ expected <- vapply(ids, function(id) {
 }, character(1))
 if (!all(file.exists(expected))) stop("Missing accepted outputs: ", paste(ids[!file.exists(expected)], collapse = ", "))
 cat("FINISHED:", normalizePath(run_root, winslash = "/"), "\n")
+})
