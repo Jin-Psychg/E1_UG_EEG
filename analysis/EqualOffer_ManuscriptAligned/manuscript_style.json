@@ -1,0 +1,34 @@
+{
+  "colors": {
+    "neu": "#A3B2C3",
+    "aff": "#4D95D8",
+    "dis": "#924B76",
+    "dom": "#E69C3D",
+    "enj": "#4B418B"
+  },
+  "labels": {
+    "neu": "Neutral",
+    "aff": "Affiliative",
+    "dis": "Disgust",
+    "dom": "Dominance",
+    "enj": "Reward"
+  },
+  "order": [
+    "neu",
+    "aff",
+    "dis",
+    "dom",
+    "enj"
+  ],
+  "jitter_half_width": 0.09,
+  "jitter_seed": 42,
+  "line_alpha": 0.3,
+  "dot_alpha": 0.55,
+  "font_family": "Arial",
+  "provenance": {
+    "palette_source": "E:\\MyPaper_withARS\\draft\\figures\\palette.py",
+    "palette_sha256": "abdf6b756094a5f44ece41b0cb04f89dcdb13c7b56d05d93491aba6b93fce51e",
+    "layout_source": "E:/MyPaper_withARS/draft/figures/fig1_e1_behaviour_v2_paired.py",
+    "layout_sha256": "a7c5831a9e17071b63f15ced0020afea9e8416a274d49156cff30b7467f31703"
+  }
+}

@@ -98,7 +98,7 @@ warnings.filterwarnings('ignore')
 # 1. GLOBAL EXPERIMENT TOGGLE & DYNAMIC CONFIGURATION
 # ==============================================================================
 # Switch between 'E1' and 'E2' to dynamically adjust component lists and windows
-EXPERIMENT_VERSION = 'E2'  
+EXPERIMENT_VERSION = 'E1'
 
 # ------------------------------------------------------------------------------
 # Component definitions are read from the single source of truth shared with the

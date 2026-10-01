@@ -1,0 +1,71 @@
+--- C:\Code\UG_ERP_Project\analysis\EqualOffer_ManuscriptAligned\manuscript_engine.R
++++ C:\Code\UG_ERP_Project\analysis\EqualOffer_ActorStructure\actor_engine.R
+@@ -639,13 +639,14 @@
+ #   group_name:         random grouping variable (default participant_id_internal)
+ #   timeout_sec:        per-stage buildmer timeout (default 1800s)
+ # ==============================================================================
+-fit_stage1_bates <- function(data, outcome_var, fixed_terms, include_terms,
++fit_stage1_actor <- function(data, outcome_var, fixed_terms, include_terms,
+                              model_family = "gaussian",
+                              random_max_vars = c("emotion", "offer_type"),
+                              group_name = "participant_id_internal",
+-                             timeout_sec = 1800) {
+-  
+-  fixed_str <- sprintf("%s ~ %s", outcome_var, fixed_terms)
++                             timeout_sec = 1800, actor_audit_dir = NULL) {
++  
++  stopifnot(model_family == "binomial", "actor_id" %in% names(data))
++  fixed_str <- sprintf("%s ~ %s + (1 | actor_id)", outcome_var, fixed_terms)
+ 
+   # Expand factor slopes into their k - 1 sum-contrast columns once, then use
+   # those numeric columns throughout all five Bates steps. This makes the ZCP
+@@ -664,7 +665,7 @@
+   # into a SINGLE formula -- paste() without collapse + as.formula() on a vector
+   # silently keeps only the first term, which let buildmer drop non-significant
+   # fixed effects (e.g., a non-significant 3-way interaction).
+-  fixed_include_str <- paste(c(include_terms, sprintf("(1 | %s)", group_name)),
++  fixed_include_str <- paste(c(include_terms, sprintf("(1 | %s)", group_name), "(1 | actor_id)"),
+                              collapse = " + ")
+   fixed_include <- as.formula(sprintf("~ %s", fixed_include_str))
+   
+@@ -813,6 +814,7 @@
+       m_zcp, require_derivatives = TRUE
+     )
+   }
++  if (!is.null(actor_audit_dir) && !is.null(m_zcp)) saveRDS(m_zcp, file.path(actor_audit_dir, "step2_zcp.rds"))
+   diag_log$step2_status <- if (is.null(step2_diag)) {
+     "fit_failed"
+   } else if (isTRUE(step2_diag$valid)) {
+@@ -842,7 +844,8 @@
+       crit = "LRT",
+       elim = buildmer::LRTalpha(0.20),
+       quiet = FALSE,
+-      ddf = "Wald"
++      ddf = "Wald",
++      args = list(control = custom_control_glmmTMB)
+     )
+     
+     bm_res <- run_buildmer_protected(
+@@ -901,6 +904,7 @@
+     m_reduced <- fit_func(f_recover, data, REML_flag = FALSE)
+   }
+   
++  if (!is.null(actor_audit_dir)) saveRDS(m_reduced, file.path(actor_audit_dir, "step3_selected.rds"))
+   diag_log$step3_final_formula <- paste(deparse(formula(m_reduced)), collapse = " ")
+   progress_log(sprintf("[Step 3] Reduced formula: %s",
+                        stringr::str_squish(diag_log$step3_final_formula)),
+@@ -912,12 +916,13 @@
+   t_step4 <- Sys.time()
+   
+   reduced_fixed <- nobars(formula(m_reduced))
+-  reduced_fixed_str <- paste(deparse(reduced_fixed), collapse = " ")
++  reduced_fixed_str <- paste(paste(deparse(reduced_fixed), collapse = " "), "+ (1 | actor_id)")
+   
+   m_final <- add_correlations_step4(m_reduced, reduced_fixed_str, data,
+                                     group_name = group_name,
+                                     model_family = model_family,
+                                     alpha_lrt = 0.20)
++  if (!is.null(actor_audit_dir)) saveRDS(m_final, file.path(actor_audit_dir, "step4_selected.rds"))
+   diag_log$step4_status <- attr(m_final, "step4_selected") %||% "ZCP_kept"
+   progress_log(sprintf("[Step 4] elapsed: %s. Selected: %s.",
+                        format_elapsed(t_step4), diag_log$step4_status),

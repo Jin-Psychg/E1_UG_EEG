@@ -1,0 +1,10 @@
+{
+  "run_robustness.R": "41841713809d66cc5841826fa9bdbb6743d0d7fdac0b5bd5a9d9c882f866f5c0",
+  "summarize_robustness.py": "5d34861321df7b8067af1679c5d8f59f1a094c1581b3fc67a66d07b170c5ef8e",
+  "verify_robustness_refits.R": "00789cff6098f8075dbdffdcc031924888a0e408939c5ded5694548150784012",
+  "verify_robustness_interpretation.py": "ed3f7f6cd5bf987e2f171efef5b06ce965deda392b635de65f46c69c778d31b6",
+  "manuscript_engine.R": "a0558944d49a0cfe0258f27ce9c593f80527adaff6216bb633efbf86b6b4e871",
+  "engine_provenance.json": "ca69013d1249596d6178a1384723353bfa0850726ab968edb157fbff2bbc84e4",
+  "ROBUSTNESS_PLAN.md": "b3927148f50be35a2025c3917f6df6a81c939962009e284ff99dca55c6e1aef1",
+  "README_robustness.md": "1a09f1806371deba83d3b7c4103e030999f02c0b19cbac591e061ee19cd136df"
+}

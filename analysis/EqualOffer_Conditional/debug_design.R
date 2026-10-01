@@ -1,0 +1,17 @@
+.libPaths(c('C:/Code/UG_ERP_Project/renv/library/R-4.3/x86_64-w64-mingw32',.libPaths()))
+library(glmmTMB);library(emmeans)
+options(contrasts=c('contr.sum','contr.poly'),digits=17)
+m<-readRDS('C:/Code/UG_ERP_Project/results/EqualOffer_Aligned_20260928_v2/E1_fair_choice.rds')
+eg<-emmeans(m,~emotion,at=list(allocation='5:5'))
+print(eg@grid);print(eg@linfct);print(m$modelInfo$contrasts)
+print(contrasts(model.frame(m)$emotion));print(contrasts(model.frame(m)$allocation))
+b<-fixef(m)$cond;V<-vcov(m)$cond
+print(names(b))
+g<-data.frame(emotion=factor(c('neu','aff','dis','dom','enj'),levels=c('neu','aff','dis','dom','enj')),allocation=factor(rep('5:5',5),levels=c('5:5','6:4')))
+X<-model.matrix(~emotion*allocation,g)[,names(b)]
+print(X)
+w<-lapply(2:5,function(j){a<-numeric(5);a[1]<- -1;a[j]<-1;a})
+ct<-contrast(eg,method=w);print(test(ct,joint=TRUE))
+L<-X[2:5,]-matrix(X[1,],4,ncol(X),byrow=TRUE)
+theta<-L%*%b;S<-L%*%V%*%t(L)
+print(t(theta)%*%solve(S,theta));print(summary(eg));print(X%*%b)

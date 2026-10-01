@@ -25,7 +25,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 # ==============================================================================
 
 # Experiment identifier. Matches upstream Python pre-processing output nomenclature.
-experiment_id <- "E2" 
+experiment_id <- "E1"
 
 # Parent directory containing all component-specific subdirectories.
 root_dir <- "C:/Code/UG_ERP_Project/results/EEG" 

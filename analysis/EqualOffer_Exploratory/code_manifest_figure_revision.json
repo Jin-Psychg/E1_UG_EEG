@@ -1,0 +1,38 @@
+[
+  {
+    "file": "README.md",
+    "sha256": "cc3a29fab983a6700d5c28f5ae2a2bb1ec4761e9d77c74ff24c01d3d0b6b48b2"
+  },
+  {
+    "file": "METHODS_COMPARISON.md",
+    "sha256": "baa6795fa06f3d720d1ae8f4183d05c70ac9e63d9d5549145145cffd7577a89d"
+  },
+  {
+    "file": "config.R",
+    "sha256": "aafce1eb29dbfbfe1a85858600e63248de0776284b596d0166620d6f8dd59120"
+  },
+  {
+    "file": "run_all.R",
+    "sha256": "54cd0548ddb7e24a6abb5b9b41211b516d0fca7cc2fe9831fb19e0d6486f98e7"
+  },
+  {
+    "file": "run_analysis.R",
+    "sha256": "ba80acd3452960977448e4c413710ba0ab5e18d396d65c17cf854121673d7029"
+  },
+  {
+    "file": "verify_results.R",
+    "sha256": "747fe69b15396596c223e7c26df77fb1ccb3c6b576c57f6171777609f2b25588"
+  },
+  {
+    "file": "render_report.R",
+    "sha256": "b2063577e097ef4d81cc64e5d674851cdcac7262f93891db931bf7c38fe4965b"
+  },
+  {
+    "file": "plot_paired.py",
+    "sha256": "57bb17068fa06ddcd290ce83dad614e688a8d6148f7b8cc518210409bed4b524"
+  },
+  {
+    "file": "manuscript_style.json",
+    "sha256": "c88f52e7e89d3b2fa32c5f73af80a9e845040bf0cb5f77fb903dbf82428bfa52"
+  }
+]

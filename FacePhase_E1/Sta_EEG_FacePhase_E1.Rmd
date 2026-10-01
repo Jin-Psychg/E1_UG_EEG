@@ -971,12 +971,19 @@ pre_check_baseline_balance <- function(data, comp_name, out_dir) {
   
   apa_tab <- if (!is.null(res)) format_anova_apa(res, model = fit) else NULL
   
-  # Extract the omnibus emotion main-effect p-value if present, for a
-  # one-line summary.
-  emotion_p <- if (!is.null(apa_tab)) {
-    em_row <- apa_tab[apa_tab$Effect == "emotion", , drop = FALSE]
-    if (nrow(em_row) == 1) em_row$p_val else NA_real_
-  } else NA_real_
+  # Extract the numeric omnibus emotion p-value from the unformatted ANOVA
+  # object. format_anova_apa() converts p_val to an APA display string, which
+  # must not be reused for numeric threshold comparisons.
+  emotion_p <- NA_real_
+  if (!is.null(res)) {
+    res_df <- as.data.frame(res)
+    p_col <- grep("^Pr\\(>", names(res_df), value = TRUE)
+    if ("emotion" %in% rownames(res_df) && length(p_col) >= 1) {
+      emotion_p <- suppressWarnings(
+        as.numeric(res_df["emotion", p_col[1], drop = TRUE])
+      )
+    }
+  }
 
   cell_means <- data %>%
     dplyr::group_by(emotion) %>%
@@ -1001,9 +1008,10 @@ pre_check_baseline_balance <- function(data, comp_name, out_dir) {
     "Model: Baseline_c ~ emotion + (1 | participant_id)",
     "",
     if (!is.na(emotion_p)) {
-      sprintf("Omnibus emotion main effect on baseline: p = %s",
-              if (emotion_p < .001) "< .001"
-              else sprintf("%.3f", emotion_p))
+      sprintf(
+        "Omnibus emotion main effect on baseline: p %s",
+        format_p_apa(emotion_p, include_equals = TRUE)
+      )
     } else "Omnibus emotion effect: not extractable",
     "",
     "## Type III ANOVA",
@@ -2684,9 +2692,10 @@ cat(sprintf("[Methods] Auto-generated paragraph: %s\n", methods_path))
 # ==============================================================================
 # 9. Session Information
 # ==============================================================================
-sink(file.path(out_root, "SESSION_INFO.txt"))
-print(sessionInfo())
-sink()
+writeLines(
+  capture.output(sessionInfo()),
+  file.path(out_root, "SESSION_INFO.txt")
+)
 
 cat(sprintf("\n========================================\n   %s pipeline complete.\n   Output: %s\n========================================\n",
             experiment_version, out_root))

@@ -48,7 +48,7 @@ if (experiment_version != "E1") {
 # FALSE = Regression Method (PRIMARY): no baseline subtraction; baseline is
 #         extracted as Baseline_<comp> covariate columns -> Alday (2019).
 # TRUE  = Standard Method  (SENSITIVITY): subtract -200..0 ms baseline mean.
-use_baseline_correction <- FALSE
+use_baseline_correction <- TRUE
 
 # -----------------------------------------------------------
 # Baseline Parameters (only relevant when use_baseline_correction == TRUE)

@@ -1,0 +1,50 @@
+[
+  {
+    "file": "ANALYSIS_PLAN.md",
+    "sha256": "43d13685b3cf95b07dc998d13bf2c0041fbf180e945fd8a933ffc760270f4520"
+  },
+  {
+    "file": "check_comparison.R",
+    "sha256": "1d8d04ab8e8d1bda9fed5fb98e056812bd38d41ef57de564524c218db8c7290f"
+  },
+  {
+    "file": "engine_provenance.json",
+    "sha256": "ca69013d1249596d6178a1384723353bfa0850726ab968edb157fbff2bbc84e4"
+  },
+  {
+    "file": "manuscript_engine.R",
+    "sha256": "a0558944d49a0cfe0258f27ce9c593f80527adaff6216bb633efbf86b6b4e871"
+  },
+  {
+    "file": "manuscript_style.json",
+    "sha256": "c88f52e7e89d3b2fa32c5f73af80a9e845040bf0cb5f77fb903dbf82428bfa52"
+  },
+  {
+    "file": "plot_paired.py",
+    "sha256": "68afe937ce65c7855909cd9ef30cf1c41d4fc2a6274ace5563c5ca63cc100faf"
+  },
+  {
+    "file": "README.md",
+    "sha256": "b3a2ecba5cfd507e6a62ba02eab28b5f6d716f9877a123d92fd064e37ba62d5e"
+  },
+  {
+    "file": "render_report.py",
+    "sha256": "8ef7e83a523ecc554932682514b3f721b06b5798854b248b3db30766d94efc00"
+  },
+  {
+    "file": "render_standard_report.py",
+    "sha256": "d60718fee316c7d2a00f9d36854fedf4795d8dc0372bd80958112861d42cd957"
+  },
+  {
+    "file": "run_all.R",
+    "sha256": "c04f3cb01461d4c7bc04d9cb38203753ca9d8085ba75b7740847abe0f81f216a"
+  },
+  {
+    "file": "run_analysis.R",
+    "sha256": "f583fda6eed6fac8a74f96bf52123715d35d5448ed306811f46740d1b88a16f6"
+  },
+  {
+    "file": "verify_results.R",
+    "sha256": "ff4f90a93a99ccaff5c22d7f8f28233104ed55a99a4a23df843e92f23e91b0d8"
+  }
+]

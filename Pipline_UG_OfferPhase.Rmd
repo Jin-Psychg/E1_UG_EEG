@@ -37,7 +37,7 @@ experiment_version <- "E1"
 # -----------------------------------------------------------
 # TRUE  = Standard Method: Subtracts baseline mean from the epoch.
 # FALSE = Regression Method: No baseline subtraction (extracts baseline as covariate).
-use_baseline_correction <- FALSE 
+use_baseline_correction <- TRUE
 
 # -----------------------------------------------------------
 # Baseline Parameters (Stimulus-Locked Only)
